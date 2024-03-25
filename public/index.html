@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Latvijas apdzīvotās vietas</title>    
+    <!-- jQuery -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>    
+     <!-- Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <style>
+        #map {
+            height: 100vh;
+            width: calc(100% - 300px);
+            float: right;
+        }
+        #sidebar {
+            width: 300px;
+            height: 100vh;
+            float: left;
+            overflow-y: auto;
+        }
+        #search {
+            width: calc(100% - 20px);
+            margin: 0px;
+        }
+        #searchResults {
+            margin: 0px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <h2>Latvijas apdzīvotās vietas</h2>
+    <input type="text" id="search" placeholder="Meklēt...">
+    <div id="searchResults"></div>
+</div>
+<div id="map"></div>
+
+<script>
+    const markers = [];
+    const map = L.map('map').setView([57.0, 25.0], 7); // Kartes inicializācija ar Latvijas koordinātām
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+$('#search').autocomplete({ // Krītošais saraksts meklēšanā
+    source: function(request, response) {
+        const term = request.term.toLowerCase();
+        const results = markers.filter(marker => {
+            const markerName = marker.name.toLowerCase();
+            return markerName.includes(term) || transliterate(markerName).includes(term);
+        });
+        response(results.map(result => result.name.replace(/#/g, '')));
+    },
+    minLength: 2,
+    select: function(event, ui) {
+        searchPlace(ui.item.value.replace(/#/g, ''));
+    }
+});
+
+function transliterate(text) { // Transliterē tekstu ar ASCII analogiem meklēšanā
+    const map = {
+        'ā':'a', 'ē':'e', 'ī':'i', 'ū':'u', 'ģ':'g', 'ķ':'k', 'ļ':'l', 'ņ':'n', 'ū':'u', 'ž':'z'
+    };
+    return text.replace(/[āēīūģķļņūž]/g, function(match) {
+        return map[match] || match;
+    });
+}
+
+function searchPlace(name) { // Latvijas apdzīvoto vietu meklēšana un to attēlošana kartē
+    const result = markers.find(marker => marker.name.replace(/#/g, '').toLowerCase() === name.toLowerCase());
+    if (result) {
+        console.log(result.name + ":", result.DD_N + " (DD_N),", result.DD_E + " (DD_E)");
+        L.marker([result.DD_N, result.DD_E]).addTo(map)
+            .bindPopup(result.name.replace(/#/g, '') + "<br>" + "DD_N: " + result.DD_N + "<br>" + "DD_E: " + result.DD_E)
+            .openPopup();
+        map.setView([result.DD_N, result.DD_E], 10);
+    } else {
+        console.log("Tādas vietas nav");
+    }
+}
+
+    $(document).ready(function() { // Datu iegūšana no CSV ar jQuery
+        $.ajax({
+            type: "GET",
+            url: "AW_VIETU_CENTROIDI.csv",
+            dataType: "text",
+            success: function(data) {
+                remotePoints(data);
+            }
+        });
+    });
+
+    function remotePoints(data) { // Z, A, D, R vietas meklēšana un attēlošana
+        Papa.parse(data, {
+            header: true, delimiter: ";", skipEmptyLines: true,
+            complete: function(results) {
+                results.data.forEach(row => { // Meklēšana caur katru datu rindu no #NOSAUKUMS#, #DD_N#, #DD_E#
+                    const name = row['#NOSAUKUMS#'].trim().replace(/#/g, ''); 
+                    const DD_N = parseFloat(row['#DD_N#'].replace('#', '').trim());
+                    const DD_E = parseFloat(row['#DD_E#'].replace('#', '').trim());
+                    if (!isNaN(DD_N) && !isNaN(DD_E) && name) {
+                        markers.push({ name, DD_N, DD_E });
+                    }
+                });
+
+                // Z, A, D, R vietas meklēšana
+                const maxNpoint = markers.reduce((max, point) => max.DD_N > point.DD_N ? max : point);
+                const minNpoint = markers.reduce((min, point) => min.DD_N < point.DD_N ? min : point);
+                const maxEpoint = markers.reduce((max, point) => max.DD_E > point.DD_E ? max : point);
+                const minEpoint = markers.reduce((min, point) => min.DD_E < point.DD_E ? min : point);
+
+                // Z, A, D, R markera pievienošana kartē
+                L.marker([maxNpoint.DD_N, maxNpoint.DD_E]).addTo(map).bindPopup("Z" + "<br>" + maxNpoint.name + "<br>" + "DD_N: " + maxNpoint.DD_N + "<br>" + "DD_E: " + maxNpoint.DD_E).openPopup();
+                L.marker([minNpoint.DD_N, minNpoint.DD_E]).addTo(map).bindPopup("D" + "<br>" + minNpoint.name + "<br>" + "DD_N: " + minNpoint.DD_N + "<br>" + "DD_E: " + minNpoint.DD_E).openPopup();
+                L.marker([maxEpoint.DD_N, maxEpoint.DD_E]).addTo(map).bindPopup("A" + "<br>" + maxEpoint.name + "<br>" + "DD_N: " + maxEpoint.DD_N + "<br>" + "DD_E: " + maxEpoint.DD_E).openPopup();
+                L.marker([minEpoint.DD_N, minEpoint.DD_E]).addTo(map).bindPopup("R" + "<br>" + minEpoint.name + "<br>" + "DD_N: " + minEpoint.DD_N + "<br>" + "DD_E: " + minEpoint.DD_E).openPopup();
+            }
+        });
+    }
+</script>
+</body>
+</html>
